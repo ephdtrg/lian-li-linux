@@ -1,0 +1,133 @@
+{
+  "id": "dual-gauge-ram",
+  "name": "Dual Gauge RAM",
+  "base_width": 400,
+  "base_height": 400,
+  "rotated": false,
+  "smooth_edges": true,
+  "background": {
+    "type": "color",
+    "rgb": [0, 0, 0, 255]
+  },
+  "widgets": [
+    {
+      "id": "memory-outer-ring",
+      "x": 200,
+      "y": 200,
+      "width": 380,
+      "height": 380,
+      "update_interval_ms": 1000,
+      "sensor_category": "mem_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "mem_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 270,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.895,
+        "background_color": [36, 50, 60, 255],
+        "value_corner_radius": 12,
+        "ranges": [{ "max": null, "color": [167, 139, 250], "alpha": 255 }]
+      }
+    },
+    {
+      "id": "memory-inner-ring",
+      "x": 200,
+      "y": 200,
+      "width": 260,
+      "height": 260,
+      "update_interval_ms": 1000,
+      "sensor_category": "mem_usage",
+      "kind": {
+        "type": "radial_gauge",
+        "source": { "type": "mem_usage" },
+        "value_min": 0,
+        "value_max": 100,
+        "start_angle": 270,
+        "sweep_angle": 360,
+        "inner_radius_pct": 0.862,
+        "background_color": [36, 50, 60, 255],
+        "value_corner_radius": 11,
+        "ranges": [{ "max": null, "color": [77, 163, 255], "alpha": 255 }]
+      }
+    },
+    {
+      "id": "title",
+      "x": 200,
+      "y": 152,
+      "width": 160,
+      "height": 42,
+      "kind": {
+        "type": "label",
+        "text": "RAM",
+        "font": { "path": "NotoSans-SemiBold.ttf" },
+        "font_size": 42,
+        "color": [159, 172, 185, 255],
+        "align": "center"
+      }
+    },
+    {
+      "id": "memory-percent-value",
+      "x": 200,
+      "y": 200,
+      "width": 220,
+      "height": 66,
+      "update_interval_ms": 1000,
+      "sensor_category": "mem_usage",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "mem_usage" },
+        "format": "{:.0}",
+        "unit": "%",
+        "font": { "path": "NotoSans-SemiBold.ttf" },
+        "font_size": 70,
+        "color": [247, 250, 252, 255],
+        "align": "center",
+        "value_min": 0,
+        "value_max": 100
+      }
+    },
+    {
+      "id": "memory-used-value",
+      "x": 110,
+      "y": 260,
+      "width": 150,
+      "height": 44,
+      "update_interval_ms": 1000,
+      "sensor_category": "mem_used",
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "mem_used" },
+        "format": "{:.0}",
+        "unit": " / ",
+        "font": { "path": "NotoSans-SemiBold.ttf" },
+        "font_size": 34,
+        "color": [77, 163, 255, 255],
+        "align": "right",
+        "value_min": 0,
+        "value_max": 1024
+      }
+    },
+    {
+      "id": "memory-total-value",
+      "x": 266,
+      "y": 260,
+      "width": 150,
+      "height": 44,
+      "update_interval_ms": 1000,
+      "kind": {
+        "type": "value_text",
+        "source": { "type": "mem_total" },
+        "format": "{:.0}",
+        "unit": " GB",
+        "font": { "path": "NotoSans-SemiBold.ttf" },
+        "font_size": 34,
+        "color": [77, 163, 255, 255],
+        "align": "left",
+        "value_min": 0,
+        "value_max": 1024
+      }
+    }
+  ]
+}

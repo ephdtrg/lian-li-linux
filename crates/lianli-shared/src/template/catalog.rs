@@ -707,4 +707,55 @@ mod tests {
             assert!(validate_template_assets(&template, &entry).is_err());
         }
     }
+
+    #[test]
+    fn dual_gauge_catalog_entries_match_their_local_assets() {
+        let manifest = catalog();
+        let unique_ids: HashSet<_> = manifest
+            .templates
+            .iter()
+            .map(|template| template.id.as_str())
+            .collect();
+        assert_eq!(unique_ids.len(), manifest.templates.len());
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../templates/assets");
+
+        for id in ["dual-gauge-cpu", "dual-gauge-gpu", "dual-gauge-ram"] {
+            let entry = manifest
+                .templates
+                .iter()
+                .find(|template| template.id == id)
+                .unwrap_or_else(|| panic!("missing catalog entry {id}"));
+            assert_eq!(entry.folder, id);
+            assert_eq!((entry.base_width, entry.base_height), (400, 400));
+            assert!(!entry.rotated);
+
+            let directory = root.join(&entry.folder);
+            let template_bytes = std::fs::read(directory.join(&entry.template_file)).unwrap();
+            let template: LcdTemplate = serde_json::from_slice(&template_bytes).unwrap();
+            assert_eq!(template.id, id);
+            assert_eq!(
+                (template.base_width, template.base_height),
+                (entry.base_width, entry.base_height)
+            );
+
+            let declared =
+                std::iter::once((entry.template_file.as_str(), entry.template_sha256.as_str()))
+                    .chain(std::iter::once((
+                        entry.preview.as_str(),
+                        entry.preview_sha256.as_str(),
+                    )))
+                    .chain(
+                        entry
+                            .files
+                            .iter()
+                            .map(|file| (file.path.as_str(), file.sha256.as_str())),
+                    );
+            for (path, expected_hash) in declared {
+                validate_relative_path(path).unwrap();
+                let bytes = std::fs::read(directory.join(path))
+                    .unwrap_or_else(|error| panic!("reading {id}/{path}: {error}"));
+                assert_eq!(format!("{:x}", Sha256::digest(bytes)), expected_hash);
+            }
+        }
+    }
 }

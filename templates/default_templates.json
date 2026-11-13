@@ -48,6 +48,81 @@
       ]
     },
     {
+      "id": "dual-gauge-cpu",
+      "name": "Dual Gauge CPU",
+      "description": "Concentric live CPU temperature and total usage gauges for round 400×400 LCDs.",
+      "author": "sgtaziz",
+      "min_daemon_version": "1.2.6",
+      "folder": "dual-gauge-cpu",
+      "template_file": "template.json",
+      "template_sha256": "d4915d57319239b98e78e85164b82e1885144bf6e33e7a93894a5f0997bbd118",
+      "preview": "preview.png",
+      "preview_sha256": "1f479962991f60a5c636b43438f5779e85ee6695277dea1634a9f7ca053b112e",
+      "base_width": 400,
+      "base_height": 400,
+      "rotated": false,
+      "files": [
+        {
+          "path": "NotoSans-SemiBold.ttf",
+          "sha256": "a4e91fd530ac2b4ef5367240144ff37d7d65d66cf76f2e9a2187b93c676f92d0"
+        },
+        {
+          "path": "OFL.txt",
+          "sha256": "e2e177a32561584d4fc13aaa3cd8e53758a12910f013fe9ca125419111722029"
+        }
+      ]
+    },
+    {
+      "id": "dual-gauge-gpu",
+      "name": "Dual Gauge GPU",
+      "description": "Concentric live GPU temperature and utilization gauges for round 400×400 LCDs.",
+      "author": "sgtaziz",
+      "min_daemon_version": "1.2.6",
+      "folder": "dual-gauge-gpu",
+      "template_file": "template.json",
+      "template_sha256": "a08f2e03c1891261bc447cd0b37bacf801f563d68ebfd6e01ec3a0aac09addbb",
+      "preview": "preview.png",
+      "preview_sha256": "33b6c9beeadff568f2cd9e3aa1157faf2883ead5c2959b2d283234b4628da04d",
+      "base_width": 400,
+      "base_height": 400,
+      "rotated": false,
+      "files": [
+        {
+          "path": "NotoSans-SemiBold.ttf",
+          "sha256": "a4e91fd530ac2b4ef5367240144ff37d7d65d66cf76f2e9a2187b93c676f92d0"
+        },
+        {
+          "path": "OFL.txt",
+          "sha256": "e2e177a32561584d4fc13aaa3cd8e53758a12910f013fe9ca125419111722029"
+        }
+      ]
+    },
+    {
+      "id": "dual-gauge-ram",
+      "name": "Dual Gauge RAM",
+      "description": "Synchronized live memory usage gauges with percentage and used / total GB readout.",
+      "author": "sgtaziz",
+      "min_daemon_version": "1.2.7",
+      "folder": "dual-gauge-ram",
+      "template_file": "template.json",
+      "template_sha256": "4b96cc9af46811414f22c0031c3fa05ff6bebd62200dc75ea88eb0d706925bbd",
+      "preview": "preview.png",
+      "preview_sha256": "97bb02d6e4722ae6850b814b262c3f8f95c95e7bd81077e6c705523eb082e1f7",
+      "base_width": 400,
+      "base_height": 400,
+      "rotated": false,
+      "files": [
+        {
+          "path": "NotoSans-SemiBold.ttf",
+          "sha256": "a4e91fd530ac2b4ef5367240144ff37d7d65d66cf76f2e9a2187b93c676f92d0"
+        },
+        {
+          "path": "OFL.txt",
+          "sha256": "e2e177a32561584d4fc13aaa3cd8e53758a12910f013fe9ca125419111722029"
+        }
+      ]
+    },
+    {
       "id": "sensor_gauge",
       "name": "Sensor Gauge",
       "description": "Single-sensor radial gauge matching the legacy Sensor media type.",
