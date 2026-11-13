@@ -99,6 +99,7 @@ impl CustomAsset {
     ) -> Result<Arc<Self>, MediaError> {
         let control = control.into();
         control.check()?;
+        let smooth_edges = smooth_edges || template.smooth_edges;
         let (canvas_w, canvas_h) = render_dimensions(screen, orientation);
         let (uniform_scale, scaled_w, scaled_h) =
             geometry::validate(template, canvas_w, canvas_h, smooth_edges)?;
@@ -213,6 +214,9 @@ impl CustomAsset {
                 state.resolved_sensor = resolve_sensor_source(source, all_sensors);
                 if state.resolved_sensor.is_none() {
                     state.next_resolve_at = Some(Instant::now() + SENSOR_RESOLVE_RETRY);
+                    if matches!(widget.kind, WidgetKind::ValueText { .. }) {
+                        state.last_render_text = Some(UNBOUND_SENSOR_TEXT.into());
+                    }
                     warn!(
                         "template '{}' widget '{}' sensor unavailable — rendering as zero until it appears",
                         template.id, widget.id
@@ -417,11 +421,6 @@ impl CustomAsset {
                     state.resolved_sensor = resolve_sensor_source(source, &self.sensors);
                     if state.resolved_sensor.is_some() {
                         state.next_resolve_at = None;
-                        debug!(
-                            "template '{}' widget '{}' sensor became available",
-                            self.template.id, widget.id
-                        );
-                        any_dynamic_changed = true;
                     } else {
                         state.next_resolve_at = Some(now + SENSOR_RESOLVE_RETRY);
                     }
@@ -432,17 +431,34 @@ impl CustomAsset {
                 if due {
                     let raw = match read_sensor_value(sensor) {
                         Ok(v) => {
-                            state.failed.store(false, Ordering::Relaxed);
+                            if state.failed.swap(false, Ordering::Relaxed) {
+                                debug!(
+                                    "template '{}' widget '{}' sensor recovered",
+                                    self.template.id, widget.id
+                                );
+                            }
                             v
                         }
                         Err(e) => {
-                            if !state.failed.swap(true, Ordering::Relaxed) {
+                            let newly_failed = !state.failed.swap(true, Ordering::Relaxed);
+                            if newly_failed {
                                 warn!(
                                     "custom template '{}' widget '{}' sensor read failed: {e}",
                                     self.template.id, widget.id
                                 );
                             }
-                            0.0
+                            state.resolved_sensor = None;
+                            state.next_resolve_at = Some(now + SENSOR_RESOLVE_RETRY);
+                            state.last_sample_at = Some(now);
+                            if matches!(widget.kind, WidgetKind::ValueText { .. }) {
+                                let changed =
+                                    state.last_render_text.as_deref() != Some(UNBOUND_SENSOR_TEXT);
+                                state.last_render_text = Some(UNBOUND_SENSOR_TEXT.into());
+                                state.last_quantized = i32::MIN;
+                                any_dynamic_changed |= changed;
+                            }
+                            any_dynamic_changed |= newly_failed;
+                            continue;
                         }
                     };
                     state.cached_value = raw;
@@ -544,6 +560,7 @@ impl CustomAsset {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn test_asset(widgets: Vec<serde_json::Value>) -> CustomAsset {
         let template: LcdTemplate = serde_json::from_value(serde_json::json!({
@@ -620,6 +637,102 @@ mod tests {
     }
 
     #[test]
+    fn failed_sensor_read_keeps_value_shows_na_and_recovers() {
+        let mut asset = test_asset(vec![serde_json::json!({
+            "id": "sensor", "x": 4, "y": 4, "width": 8, "height": 8,
+            "kind": {
+                "type": "value_text", "source": {"type": "constant", "value": 50},
+                "font_size": 4, "color": [255, 255, 255, 255]
+            }
+        })]);
+        let mut sample = tempfile::NamedTempFile::new().unwrap();
+        write!(sample, "42").unwrap();
+        asset.widget_states.lock()[0].resolved_sensor =
+            Some(lianli_shared::sensors::ResolvedSensor::SysfsFile {
+                path: sample.path().to_path_buf(),
+                divider: 1,
+            });
+
+        asset.render_frame_rgba_with(true, |_| ()).unwrap().unwrap();
+        assert_eq!(asset.widget_states.lock()[0].cached_value, 42.0);
+
+        drop(sample);
+        asset.widget_states.lock()[0].last_sample_at = None;
+        assert!(asset
+            .render_frame_rgba_with(false, |_| ())
+            .unwrap()
+            .is_some());
+        {
+            let states = asset.widget_states.lock();
+            assert_eq!(states[0].cached_value, 42.0);
+            assert_eq!(states[0].last_render_text.as_deref(), Some("N/A"));
+            assert!(states[0].resolved_sensor.is_none());
+            assert!(states[0].next_resolve_at.is_some());
+        }
+
+        assert!(asset
+            .render_frame_rgba_with(false, |_| panic!("retried before deadline"))
+            .unwrap()
+            .is_none());
+        *asset.template.widgets[0].kind.source_config_mut().unwrap() =
+            lianli_shared::media::SensorSourceConfig::Command {
+                cmd: "false".into(),
+            };
+        {
+            let mut states = asset.widget_states.lock();
+            states[0].next_resolve_at = Some(Instant::now());
+            states[0].last_sample_at = None;
+        }
+        assert!(asset
+            .render_frame_rgba_with(false, |_| panic!("broken retry emitted a frame"))
+            .unwrap()
+            .is_none());
+        *asset.template.widgets[0].kind.source_config_mut().unwrap() =
+            lianli_shared::media::SensorSourceConfig::Constant { value: 50.0 };
+        {
+            let mut states = asset.widget_states.lock();
+            states[0].next_resolve_at = Some(Instant::now());
+            states[0].last_sample_at = None;
+        }
+        assert!(asset
+            .render_frame_rgba_with(false, |_| ())
+            .unwrap()
+            .is_some());
+        let states = asset.widget_states.lock();
+        assert_eq!(states[0].cached_value, 50.0);
+        assert_eq!(states[0].last_render_text.as_deref(), Some("50"));
+    }
+
+    #[test]
+    fn template_can_require_smooth_gauge_edges() {
+        let template: LcdTemplate = serde_json::from_value(serde_json::json!({
+            "id": "smooth", "name": "Smooth", "base_width": 400, "base_height": 400,
+            "smooth_edges": true,
+            "background": {"type": "color", "rgb": [0, 0, 0]},
+            "widgets": [{
+                "id": "ring", "x": 200, "y": 200, "width": 300, "height": 300,
+                "kind": {"type": "radial_gauge", "source": {"type": "constant", "value": 50},
+                    "value_min": 0, "value_max": 100, "start_angle": 270,
+                    "sweep_angle": 360, "inner_radius_pct": 0.8,
+                    "background_color": [20, 20, 20, 255]}
+            }]
+        }))
+        .unwrap();
+
+        let asset = CustomAsset::new(
+            &template,
+            0.0,
+            &ScreenInfo::WIRELESS_LCD,
+            &[],
+            false,
+            30.0,
+            false,
+        )
+        .unwrap();
+        assert!(asset.smooth_edges);
+    }
+
+    #[test]
     fn unbound_placeholder_never_reports_its_placeholder_reading() {
         let asset = test_asset(vec![serde_json::json!({
             "id": "gpu", "x": 4, "y": 4, "width": 8, "height": 8,
@@ -636,6 +749,36 @@ mod tests {
         let states = asset.widget_states.lock();
         assert!(states[0].resolved_sensor.is_none());
         assert_eq!(states[0].cached_value, 0.0);
+    }
+
+    #[test]
+    fn initially_missing_bound_sensor_shows_na_and_schedules_retry() {
+        let template: LcdTemplate = serde_json::from_value(serde_json::json!({
+            "id": "missing", "name": "Missing", "base_width": 400, "base_height": 400,
+            "background": {"type": "color", "rgb": [0, 0, 0]},
+            "widgets": [{
+                "id": "temperature", "x": 200, "y": 200, "width": 200, "height": 80,
+                "kind": {"type": "value_text",
+                    "source": {"type": "hwmon", "name": "missing-test-device", "label": "temp1"},
+                    "font_size": 40, "color": [255, 255, 255]}
+            }]
+        }))
+        .unwrap();
+
+        let asset = CustomAsset::new(
+            &template,
+            0.0,
+            &ScreenInfo::WIRELESS_LCD,
+            &[],
+            false,
+            30.0,
+            false,
+        )
+        .unwrap();
+        let states = asset.widget_states.lock();
+        assert_eq!(states[0].last_render_text.as_deref(), Some("N/A"));
+        assert!(states[0].resolved_sensor.is_none());
+        assert!(states[0].next_resolve_at.is_some());
     }
 
     #[test]

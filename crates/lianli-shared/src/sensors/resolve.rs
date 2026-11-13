@@ -9,7 +9,8 @@ pub fn resolve_sensor(source: &SensorSource, divider: usize) -> Option<ResolvedS
         SensorSource::CpuUsage
         | SensorSource::MemUsage
         | SensorSource::MemUsed
-        | SensorSource::MemFree => Some(ResolvedSensor::Virtual {
+        | SensorSource::MemFree
+        | SensorSource::MemTotal => Some(ResolvedSensor::Virtual {
             source: source.clone(),
             divider,
         }),

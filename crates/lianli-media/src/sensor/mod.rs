@@ -156,6 +156,7 @@ impl SensorAsset {
             | SensorSourceConfig::MemUsage
             | SensorSourceConfig::MemUsed
             | SensorSourceConfig::MemFree
+            | SensorSourceConfig::MemTotal
             | SensorSourceConfig::NetworkRx { .. }
             | SensorSourceConfig::NetworkTx { .. }
             | SensorSourceConfig::DiskRead { .. }

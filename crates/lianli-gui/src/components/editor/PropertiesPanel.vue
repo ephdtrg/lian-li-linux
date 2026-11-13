@@ -267,6 +267,8 @@ function sourceLabel(src: SensorSourceConfig | null | undefined): string {
       return t("editor.properties.sources.memUsed");
     case "mem_free":
       return t("editor.properties.sources.memFree");
+    case "mem_total":
+      return t("editor.properties.sources.memTotal");
     case "network_rx":
       return t("editor.properties.sources.networkRx", { iface: src.iface });
     case "network_tx":

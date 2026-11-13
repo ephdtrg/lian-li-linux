@@ -55,6 +55,14 @@ pub fn enumerate_sensors() -> Vec<SensorInfo> {
         unit: Unit::SIZE,
         current_value: Some(0.0),
     });
+    sensors.push(SensorInfo {
+        source: SensorSource::MemTotal,
+        sensor_name: None,
+        display_name: Some("RAM: Total".to_string()),
+        divider: 1024 * 1024,
+        unit: Unit::SIZE,
+        current_value: Some(0.0),
+    });
 
     // `/sys/class/hwmon` walk (CPU temps, fan RPMs, voltages, etc.).
     let gpu_names = gpu::get_amd_gpu_names();
@@ -76,4 +84,22 @@ pub fn enumerate_sensors() -> Vec<SensorInfo> {
 pub fn enumerate_pwm_headers() -> Vec<PwmHeader> {
     let gpu_names = gpu::get_amd_gpu_names();
     hwmon::enumerate_pwm_headers(&gpu_names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enumerate_sensors;
+    use crate::sensors::{SensorSource, Unit};
+
+    #[test]
+    fn enumeration_exposes_total_memory_in_gibibytes() {
+        let sensor = enumerate_sensors()
+            .into_iter()
+            .find(|sensor| sensor.source == SensorSource::MemTotal)
+            .unwrap();
+
+        assert_eq!(sensor.display_name.as_deref(), Some("RAM: Total"));
+        assert_eq!(sensor.divider, 1024 * 1024);
+        assert_eq!(sensor.unit, Unit::SIZE);
+    }
 }

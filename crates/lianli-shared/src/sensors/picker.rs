@@ -115,6 +115,7 @@ pub fn infer_sensor_category(source: &SensorSourceConfig) -> Option<SensorCatego
         SensorSourceConfig::MemUsage => Some(SensorCategory::MemUsage),
         SensorSourceConfig::MemUsed => Some(SensorCategory::MemUsed),
         SensorSourceConfig::MemFree => Some(SensorCategory::MemFree),
+        SensorSourceConfig::MemTotal => None,
         SensorSourceConfig::NvidiaGpu {
             metric: NvidiaMetric::Temp,
             ..
@@ -172,6 +173,7 @@ fn source_to_config(source: SensorSource) -> SensorSourceConfig {
         SensorSource::MemUsage => SensorSourceConfig::MemUsage,
         SensorSource::MemUsed => SensorSourceConfig::MemUsed,
         SensorSource::MemFree => SensorSourceConfig::MemFree,
+        SensorSource::MemTotal => SensorSourceConfig::MemTotal,
         SensorSource::NetworkRate { iface, direction } => match direction {
             NetDirection::Rx => SensorSourceConfig::NetworkRx { iface },
             NetDirection::Tx => SensorSourceConfig::NetworkTx { iface },

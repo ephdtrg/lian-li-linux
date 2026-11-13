@@ -235,6 +235,7 @@ export type SensorSourceConfig =
   | { type: "mem_usage" }
   | { type: "mem_used" }
   | { type: "mem_free" }
+  | { type: "mem_total" }
   | { type: "network_rx"; iface: string }
   | { type: "network_tx"; iface: string }
   | { type: "disk_read"; device: string }
@@ -335,6 +336,7 @@ export type SensorSource =
   | { type: "mem_usage" }
   | { type: "mem_used" }
   | { type: "mem_free" }
+  | { type: "mem_total" }
   | { type: "network_rate"; iface: string; direction: "rx" | "tx" }
   | { type: "disk_rate"; device: string; direction: "read" | "write" };
 
@@ -578,6 +580,7 @@ export interface LcdTemplate {
   background: TemplateBackground;
   widgets: Widget[];
   rotated: boolean;
+  smooth_edges?: boolean;
   target_device?: string | null;
 }
 

@@ -87,6 +87,7 @@ const messages: typeof en = {
       memUsage: "内存使用率（%）",
       memUsed: "已用内存（GB）",
       memFree: "可用内存（GB）",
+      memTotal: "内存总量（GB）",
       networkRx: "网络 {iface}：接收（MB/s）",
       networkTx: "网络 {iface}：发送（MB/s）",
       diskRead: "磁盘 {device}：读取（MB/s）",

@@ -4,13 +4,150 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::Command;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SensorReading {
     pub value: f32,
     pub observed_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MemorySnapshot {
+    total_kib: f32,
+    available_kib: f32,
+}
+
+impl MemorySnapshot {
+    pub fn parse(content: &str) -> anyhow::Result<Self> {
+        let total_kib = parse_meminfo_kib(content, "MemTotal:")?;
+        let available_kib = parse_meminfo_kib(content, "MemAvailable:")?;
+        anyhow::ensure!(total_kib.is_finite() && total_kib > 0.0, "invalid MemTotal");
+        anyhow::ensure!(
+            available_kib.is_finite() && available_kib >= 0.0 && available_kib <= total_kib,
+            "invalid MemAvailable"
+        );
+        Ok(Self {
+            total_kib,
+            available_kib,
+        })
+    }
+
+    pub fn usage_percent(self) -> f32 {
+        self.used_kib() * 100.0 / self.total_kib
+    }
+
+    pub fn used_gib(self) -> f32 {
+        self.used_kib() / 1024.0 / 1024.0
+    }
+
+    pub fn available_gib(self) -> f32 {
+        self.available_kib / 1024.0 / 1024.0
+    }
+
+    pub fn total_gib(self) -> f32 {
+        self.total_kib / 1024.0 / 1024.0
+    }
+
+    fn used_kib(self) -> f32 {
+        self.total_kib - self.available_kib
+    }
+}
+
+fn parse_meminfo_kib(content: &str, field: &str) -> anyhow::Result<f32> {
+    let line = content
+        .lines()
+        .find(|line| line.starts_with(field))
+        .ok_or_else(|| anyhow::anyhow!("missing {field}"))?;
+    line.split_whitespace()
+        .nth(1)
+        .ok_or_else(|| anyhow::anyhow!("missing value for {field}"))?
+        .parse()
+        .map_err(|error| anyhow::anyhow!("invalid value for {field}: {error}"))
+}
+
+#[derive(Default)]
+struct MemoryCacheState {
+    sample: Option<(Instant, CachedMemorySnapshot)>,
+    loading: bool,
+}
+
+#[derive(Clone)]
+enum CachedMemorySnapshot {
+    Available(MemorySnapshot),
+    Failed(Arc<str>),
+}
+
+impl CachedMemorySnapshot {
+    fn into_result(self) -> anyhow::Result<MemorySnapshot> {
+        match self {
+            Self::Available(snapshot) => Ok(snapshot),
+            Self::Failed(message) => Err(anyhow::anyhow!(message.to_string())),
+        }
+    }
+}
+
+#[derive(Default)]
+struct MemoryCache {
+    state: Mutex<MemoryCacheState>,
+    ready: Condvar,
+}
+
+static MEMORY_CACHE: OnceLock<MemoryCache> = OnceLock::new();
+const MEMORY_CACHE_TTL: Duration = Duration::from_millis(100);
+
+fn memory_snapshot() -> anyhow::Result<MemorySnapshot> {
+    cached_memory_snapshot_at(
+        MEMORY_CACHE.get_or_init(MemoryCache::default),
+        Instant::now(),
+        || {
+            let content = std::fs::read_to_string("/proc/meminfo")
+                .map_err(|error| anyhow::anyhow!("reading /proc/meminfo: {error}"))?;
+            MemorySnapshot::parse(&content)
+        },
+    )
+}
+
+fn cached_memory_snapshot_at(
+    cache: &MemoryCache,
+    now: Instant,
+    load: impl FnOnce() -> anyhow::Result<MemorySnapshot>,
+) -> anyhow::Result<MemorySnapshot> {
+    let mut state = cache
+        .state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("memory snapshot cache lock poisoned"))?;
+    loop {
+        if let Some((sampled_at, cached)) = &state.sample {
+            if now.saturating_duration_since(*sampled_at) < MEMORY_CACHE_TTL {
+                return cached.clone().into_result();
+            }
+        }
+        if !state.loading {
+            state.loading = true;
+            break;
+        }
+        state = cache
+            .ready
+            .wait(state)
+            .map_err(|_| anyhow::anyhow!("memory snapshot cache lock poisoned"))?;
+    }
+    drop(state);
+
+    let loaded = load();
+    let mut state = cache
+        .state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("memory snapshot cache lock poisoned"))?;
+    state.loading = false;
+    let cached = match loaded {
+        Ok(snapshot) => CachedMemorySnapshot::Available(snapshot),
+        Err(error) => CachedMemorySnapshot::Failed(Arc::from(error.to_string())),
+    };
+    state.sample = Some((now, cached.clone()));
+    cache.ready.notify_all();
+    cached.into_result()
 }
 
 pub fn read_sensor_reading(resolved: &ResolvedSensor) -> anyhow::Result<SensorReading> {
@@ -63,23 +200,10 @@ pub fn read_sensor_value(resolved: &ResolvedSensor) -> anyhow::Result<f32> {
         }
         ResolvedSensor::Virtual { source, divider } => match source {
             SensorSource::CpuUsage => Ok(SysSensor::get_cpu_usage() as f32 / *divider as f32),
-            SensorSource::MemUsage => {
-                let content = std::fs::read_to_string("/proc/meminfo")
-                    .map_err(|e| anyhow::anyhow!("reading /proc/meminfo: {e}"))?;
-                Ok(get_mem_usage(&content))
-            }
-            SensorSource::MemUsed => {
-                let content = std::fs::read_to_string("/proc/meminfo")
-                    .map_err(|e| anyhow::anyhow!("reading /proc/meminfo: {e}"))?;
-                let total = extract_mem_value(&content, "MemTotal:").unwrap_or(0.0);
-                let avail = extract_mem_value(&content, "MemAvailable:").unwrap_or(0.0);
-                Ok((total - avail) / *divider as f32)
-            }
-            SensorSource::MemFree => {
-                let content = std::fs::read_to_string("/proc/meminfo")
-                    .map_err(|e| anyhow::anyhow!("reading /proc/meminfo: {e}"))?;
-                Ok(extract_mem_value(&content, "MemAvailable:").unwrap_or(0.0) / *divider as f32)
-            }
+            SensorSource::MemUsage => Ok(memory_snapshot()?.usage_percent()),
+            SensorSource::MemUsed => Ok(memory_snapshot()?.used_kib() / *divider as f32),
+            SensorSource::MemFree => Ok(memory_snapshot()?.available_kib / *divider as f32),
+            SensorSource::MemTotal => Ok(memory_snapshot()?.total_kib / *divider as f32),
             _ => anyhow::bail!("unexpected virtual sensor source"),
         },
         ResolvedSensor::NvidiaGpu { index, metric } => {
@@ -244,18 +368,147 @@ fn read_disk_counter(device: &str, direction: DiskDirection) -> anyhow::Result<u
 }
 
 pub fn get_mem_usage(content: &str) -> f32 {
-    let mem_total = extract_mem_value(content, "MemTotal:");
-    let mem_avail = extract_mem_value(content, "MemAvailable:");
-    if let (Some(total), Some(avail)) = (mem_total, mem_avail) {
-        if total > 0.0 {
-            return 100.0 - avail * 100.0 / total;
-        }
-    }
-    0.0
+    MemorySnapshot::parse(content)
+        .map(MemorySnapshot::usage_percent)
+        .unwrap_or(0.0)
 }
 
-fn extract_mem_value(input: &str, target: &str) -> Option<f32> {
-    let line = input.lines().find(|l| l.starts_with(target))?;
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    parts.get(1)?.parse::<f32>().ok()
+#[cfg(test)]
+mod memory_tests {
+    use super::{cached_memory_snapshot_at, MemoryCache, MemorySnapshot};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn memory_snapshot_reports_coherent_values() {
+        let snapshot =
+            MemorySnapshot::parse("MemTotal:       33554432 kB\nMemAvailable:   10485760 kB\n")
+                .unwrap();
+
+        assert_eq!(snapshot.total_gib(), 32.0);
+        assert_eq!(snapshot.used_gib(), 22.0);
+        assert_eq!(snapshot.available_gib(), 10.0);
+        assert_eq!(snapshot.usage_percent(), 68.75);
+    }
+
+    #[test]
+    fn memory_snapshot_rejects_invalid_meminfo() {
+        for content in [
+            "MemTotal: 0 kB\nMemAvailable: 0 kB\n",
+            "MemTotal: 1024 kB\n",
+            "MemAvailable: 512 kB\n",
+            "MemTotal: nope kB\nMemAvailable: 512 kB\n",
+            "MemTotal: 512 kB\nMemAvailable: 1024 kB\n",
+        ] {
+            assert!(MemorySnapshot::parse(content).is_err(), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn memory_snapshot_cache_reuses_then_refreshes_the_sample() {
+        let cache = MemoryCache::default();
+        let loads = AtomicUsize::new(0);
+        let started = Instant::now();
+        let load = || {
+            let value = loads.fetch_add(1, Ordering::Relaxed) + 1;
+            MemorySnapshot::parse(&format!(
+                "MemTotal: 1048576 kB\nMemAvailable: {} kB\n",
+                1048576 - value
+            ))
+        };
+
+        let first = cached_memory_snapshot_at(&cache, started, load).unwrap();
+        let cached =
+            cached_memory_snapshot_at(&cache, started + Duration::from_millis(99), load).unwrap();
+        let refreshed =
+            cached_memory_snapshot_at(&cache, started + Duration::from_millis(100), load).unwrap();
+
+        assert_eq!(loads.load(Ordering::Relaxed), 2);
+        assert_eq!(first, cached);
+        assert_ne!(cached, refreshed);
+    }
+
+    #[test]
+    fn concurrent_memory_snapshot_requests_share_one_load() {
+        let cache = MemoryCache::default();
+        let loads = AtomicUsize::new(0);
+        let started = Instant::now();
+        let (first_loading_tx, first_loading_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (second_loading_tx, second_loading_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let cache_ref = &cache;
+            let loads_ref = &loads;
+            let first = scope.spawn(move || {
+                cached_memory_snapshot_at(cache_ref, started, || {
+                    loads_ref.fetch_add(1, Ordering::Relaxed);
+                    first_loading_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    MemorySnapshot::parse("MemTotal: 1048576 kB\nMemAvailable: 524288 kB\n")
+                })
+                .unwrap()
+            });
+            first_loading_rx.recv().unwrap();
+
+            let cache_ref = &cache;
+            let loads_ref = &loads;
+            let second = scope.spawn(move || {
+                cached_memory_snapshot_at(cache_ref, started, || {
+                    loads_ref.fetch_add(1, Ordering::Relaxed);
+                    second_loading_tx.send(()).unwrap();
+                    MemorySnapshot::parse("MemTotal: 1048576 kB\nMemAvailable: 262144 kB\n")
+                })
+                .unwrap()
+            });
+
+            let duplicate_load = second_loading_rx
+                .recv_timeout(Duration::from_millis(200))
+                .is_ok();
+            release_tx.send(()).unwrap();
+
+            assert_eq!(first.join().unwrap(), second.join().unwrap());
+            assert!(
+                !duplicate_load,
+                "concurrent request started a duplicate load"
+            );
+        });
+        assert_eq!(loads.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn concurrent_memory_snapshot_failures_share_one_load() {
+        let cache = MemoryCache::default();
+        let loads = AtomicUsize::new(0);
+        let started = Instant::now();
+        let (first_loading_tx, first_loading_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        std::thread::scope(|scope| {
+            let cache_ref = &cache;
+            let loads_ref = &loads;
+            let first = scope.spawn(move || {
+                cached_memory_snapshot_at(cache_ref, started, || {
+                    loads_ref.fetch_add(1, Ordering::Relaxed);
+                    first_loading_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    anyhow::bail!("unavailable")
+                })
+            });
+            first_loading_rx.recv().unwrap();
+
+            let second = scope.spawn(|| {
+                cached_memory_snapshot_at(&cache, started, || {
+                    loads.fetch_add(1, Ordering::Relaxed);
+                    anyhow::bail!("duplicate load")
+                })
+            });
+            release_tx.send(()).unwrap();
+
+            assert!(first.join().unwrap().is_err());
+            assert!(second.join().unwrap().is_err());
+        });
+        assert_eq!(loads.load(Ordering::Relaxed), 1);
+    }
 }

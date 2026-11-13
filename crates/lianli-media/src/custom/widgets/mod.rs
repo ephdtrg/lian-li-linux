@@ -76,8 +76,11 @@ fn render_key(kind: &WidgetKind, state: &WidgetState) -> u64 {
     let mut h = DefaultHasher::new();
     match kind {
         WidgetKind::Label { .. } | WidgetKind::Image { .. } => 0u8.hash(&mut h),
-        WidgetKind::ValueText { .. }
-        | WidgetKind::RadialGauge { .. }
+        WidgetKind::ValueText { .. } => {
+            state.last_quantized.hash(&mut h);
+            state.last_render_text.hash(&mut h);
+        }
+        WidgetKind::RadialGauge { .. }
         | WidgetKind::VerticalBar { .. }
         | WidgetKind::HorizontalBar { .. }
         | WidgetKind::Speedometer { .. } => state.last_quantized.hash(&mut h),

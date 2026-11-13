@@ -85,6 +85,7 @@ export default {
       memUsage: "Memory Usage (%)",
       memUsed: "Memory Used (GB)",
       memFree: "Memory Free (GB)",
+      memTotal: "Memory Total (GB)",
       networkRx: "Network {iface}: Rx (MB/s)",
       networkTx: "Network {iface}: Tx (MB/s)",
       diskRead: "Disk {device}: Read (MB/s)",

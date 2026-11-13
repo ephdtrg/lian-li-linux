@@ -56,6 +56,8 @@ pub enum SensorSourceConfig {
     MemUsed,
     #[serde(rename = "mem_free")]
     MemFree,
+    #[serde(rename = "mem_total")]
+    MemTotal,
     #[serde(rename = "network_rx")]
     NetworkRx {
         iface: String,
@@ -104,6 +106,7 @@ impl SensorSourceConfig {
             Self::MemUsage => crate::sensors::SensorSource::MemUsage,
             Self::MemUsed => crate::sensors::SensorSource::MemUsed,
             Self::MemFree => crate::sensors::SensorSource::MemFree,
+            Self::MemTotal => crate::sensors::SensorSource::MemTotal,
             Self::NetworkRx { iface } => crate::sensors::SensorSource::NetworkRate {
                 iface: iface.clone(),
                 direction: crate::sensors::NetDirection::Rx,
@@ -296,7 +299,8 @@ impl SensorDescriptor {
             SensorSourceConfig::CpuUsage
             | SensorSourceConfig::MemUsage
             | SensorSourceConfig::MemUsed
-            | SensorSourceConfig::MemFree => {}
+            | SensorSourceConfig::MemFree
+            | SensorSourceConfig::MemTotal => {}
             SensorSourceConfig::NetworkRx { iface } | SensorSourceConfig::NetworkTx { iface } => {
                 if iface.trim().is_empty() {
                     anyhow::bail!("network sensor iface must not be empty");
@@ -510,7 +514,7 @@ fn default_true() -> bool {
 
 #[cfg(test)]
 mod framing_tests {
-    use super::{CropRect, MediaFraming};
+    use super::{CropRect, MediaFraming, SensorSourceConfig};
     use crate::template::ImageFit;
 
     fn framing(fit: ImageFit, zoom: f32, offset_x: f32, offset_y: f32) -> MediaFraming {
@@ -586,5 +590,13 @@ mod framing_tests {
         assert_eq!(encoded["framing"]["fit"], "cover");
         let decoded: crate::config::LcdConfig = serde_json::from_value(encoded).unwrap();
         assert_eq!(decoded.framing.fit, ImageFit::Cover);
+    }
+
+    #[test]
+    fn memory_total_source_round_trips_through_json() {
+        let encoded = serde_json::to_value(SensorSourceConfig::MemTotal).unwrap();
+        assert_eq!(encoded, serde_json::json!({"type": "mem_total"}));
+        let decoded: SensorSourceConfig = serde_json::from_value(encoded).unwrap();
+        assert!(matches!(decoded, SensorSourceConfig::MemTotal));
     }
 }

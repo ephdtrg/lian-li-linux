@@ -47,6 +47,8 @@ pub struct LcdTemplate {
     #[serde(default)]
     pub rotated: bool,
     #[serde(default)]
+    pub smooth_edges: bool,
+    #[serde(default)]
     pub target_device: Option<String>,
 }
 
@@ -224,6 +226,25 @@ mod tests {
             "widgets": widgets
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn smooth_edges_is_backward_compatible_and_round_trips() {
+        let legacy: LcdTemplate = serde_json::from_value(serde_json::json!({
+            "id": "legacy", "name": "Legacy", "base_width": 400, "base_height": 400,
+            "background": {"type": "color", "rgb": [0, 0, 0]}, "widgets": []
+        }))
+        .unwrap();
+        assert!(!legacy.smooth_edges);
+
+        let enabled: LcdTemplate = serde_json::from_value(serde_json::json!({
+            "id": "smooth", "name": "Smooth", "base_width": 400, "base_height": 400,
+            "background": {"type": "color", "rgb": [0, 0, 0]}, "widgets": [],
+            "smooth_edges": true
+        }))
+        .unwrap();
+        assert!(enabled.smooth_edges);
+        assert_eq!(serde_json::to_value(enabled).unwrap()["smooth_edges"], true);
     }
 
     fn sensor(source: SensorSource, unit: Unit) -> SensorInfo {
